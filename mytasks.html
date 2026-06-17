@@ -167,6 +167,13 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:
 .filter-chip:hover{border-color:#aaa}
 .filter-chip.active{background:var(--accent);color:#fff;border-color:var(--accent)}
 
+/* SORT BAR */
+.sort-bar{display:flex;align-items:center;gap:6px;margin-bottom:14px;flex-wrap:wrap;padding:6px 10px;background:#fafafa;border:1px solid var(--border);border-radius:8px}
+.sort-bar-label{font-size:12px;color:var(--text-muted);font-weight:500;margin-right:2px}
+.sort-chip{display:flex;align-items:center;gap:4px;padding:4px 10px;border:1px solid var(--border);border-radius:20px;font-size:12px;cursor:pointer;background:#fff;transition:all .15s;white-space:nowrap}
+.sort-chip:hover{border-color:#aaa;background:#f0f0f0}
+.sort-chip.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.sort-chip .arrow{font-size:10px;opacity:.7}
 /* SCROLLBAR */
 ::-webkit-scrollbar{width:6px}
 ::-webkit-scrollbar-track{background:transparent}
@@ -330,10 +337,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;display:
 
 <!-- PRIORITY PICKER -->
 <div id="priority-popup" class="picker-popup" style="display:none">
-  <div class="picker-item" onclick="setPriority(1)"><div class="dot" style="background:var(--red)"></div>Priority 1</div>
-  <div class="picker-item" onclick="setPriority(2)"><div class="dot" style="background:var(--orange)"></div>Priority 2</div>
-  <div class="picker-item" onclick="setPriority(3)"><div class="dot" style="background:var(--blue)"></div>Priority 3</div>
-  <div class="picker-item" onclick="setPriority(4)"><div class="dot" style="background:#ccc"></div>Priority 4</div>
+  <div class="picker-item" onclick="setPriority(1)"><div class="dot" style="background:var(--red)"></div>🔴 P1 — Urgent</div>
+  <div class="picker-item" onclick="setPriority(2)"><div class="dot" style="background:var(--orange)"></div>🟠 P2 — High</div>
+  <div class="picker-item" onclick="setPriority(3)"><div class="dot" style="background:var(--blue)"></div>🔵 P3 — Medium</div>
+  <div class="picker-item" onclick="setPriority(4)"><div class="dot" style="background:#ccc"></div>⚪ P4 — Normal</div>
 </div>
 
 <!-- LABEL PICKER -->
@@ -380,6 +387,15 @@ let currentView='inbox';
 let currentProjectId='inbox';
 let searchQuery='';
 let currentEditId=null;
+// sort state: key = view id, value = {field, dir}
+let sortState={};
+const SORT_FIELDS=[
+  {key:'priority',label:'Priority'},
+  {key:'dueDate',label:'Due Date'},
+  {key:'name',label:'Name'},
+  {key:'created',label:'Date Added'},
+  {key:'project',label:'Project'},
+];
 let modalDueDate='';
 let modalPriority=4;
 let modalLabels=[];
@@ -480,11 +496,91 @@ function renderView(){
   renderSidebar();
 }
 
+// ============ SORT ENGINE ============
+function getSortState(viewId){
+  if(!sortState[viewId]) sortState[viewId]={field:'priority',dir:'asc'};
+  return sortState[viewId];
+}
+function setSort(viewId, field){
+  var st=getSortState(viewId);
+  if(st.field===field){
+    st.dir=(st.dir==='asc'?'desc':'asc');
+  } else {
+    sortState[viewId]={field:field,dir:'asc'};
+  }
+  renderView();
+}
+function applySort(tasks, viewId){
+  if(!tasks||tasks.length===0) return [];
+  var st=getSortState(viewId);
+  var field=st.field;
+  var mul=(st.dir==='asc')?1:-1;
+  var sorted=tasks.slice();
+  sorted.sort(function(a,b){
+    var av, bv;
+    if(field==='priority'){
+      av=(a.priority>0&&a.priority<=4)?a.priority:4;
+      bv=(b.priority>0&&b.priority<=4)?b.priority:4;
+      return (av-bv)*mul;
+    }
+    if(field==='dueDate'){
+      av=a.dueDate?a.dueDate:'9999-99-99';
+      bv=b.dueDate?b.dueDate:'9999-99-99';
+    } else if(field==='name'){
+      av=(a.name||'').toLowerCase();
+      bv=(b.name||'').toLowerCase();
+    } else if(field==='created'){
+      av=a.created?a.created:'0000-00-00';
+      bv=b.created?b.created:'0000-00-00';
+    } else if(field==='project'){
+      av=getProjectName(a.projectId).toLowerCase();
+      bv=getProjectName(b.projectId).toLowerCase();
+    } else {
+      return 0;
+    }
+    if(av<bv) return -1*mul;
+    if(av>bv) return 1*mul;
+    return 0;
+  });
+  return sorted;
+}
+function buildSortBar(viewId){
+  var st=getSortState(viewId);
+  var fields=[
+    {key:'priority',label:'Priority'},
+    {key:'dueDate',label:'Due Date'},
+    {key:'name',label:'Name'},
+    {key:'created',label:'Date Added'}
+  ];
+  var bar=document.createElement('div');
+  bar.className='sort-bar';
+  var lbl=document.createElement('span');
+  lbl.className='sort-bar-label';
+  lbl.textContent='Sort by:';
+  bar.appendChild(lbl);
+  for(var i=0;i<fields.length;i++){
+    (function(fkey,flabel){
+      var isActive=(fkey===st.field);
+      var chip=document.createElement('div');
+      chip.className='sort-chip'+(isActive?' active':'');
+      var arrow=isActive?(st.dir==='asc'?' ↑':' ↓'):'';
+      chip.textContent=flabel+arrow;
+      chip.setAttribute('data-view',viewId);
+      chip.setAttribute('data-field',fkey);
+      chip.addEventListener('click',function(){
+        setSort(this.getAttribute('data-view'),this.getAttribute('data-field'));
+      });
+      bar.appendChild(chip);
+    })(fields[i].key,fields[i].label);
+  }
+  return bar;
+}
+
 function renderProjectView(projId){
   const proj=data.projects.find(p=>p.id===projId)||{name:'Inbox',color:'#db4035',id:'inbox'};
   const tasks=data.tasks.filter(t=>t.projectId===projId||(!t.projectId&&projId==='inbox'));
   const done=tasks.filter(t=>t.done);
-  const active=tasks.filter(t=>!t.done);
+  const active=applySort(tasks.filter(t=>!t.done), 'proj-'+projId);
   const c=document.getElementById('content');
   c.innerHTML=`
     <div class="proj-view-header">
@@ -494,10 +590,12 @@ function renderProjectView(projId){
         ${proj.id!=='inbox'?`<button class="tb-btn" onclick="deleteProjectConfirm('${proj.id}')">🗑 Delete project</button>`:''}
       </div>
     </div>
+    <div id="sort-bar-slot"></div>
     <div id="task-list-main"></div>
     <div class="add-task-inline" onclick="openAddTask('${projId}')"><span class="plus">+</span> Add task</div>
     ${done.length?`<div class="section-header" onclick="toggleCompleted()" style="margin-top:20px">Completed <span class="sec-count">${done.length}</span> <span style="color:var(--text-muted);font-size:11px;margin-left:auto">▼</span></div><div id="completed-list" style="display:none"></div>`:''}
   `;
+  document.getElementById('sort-bar-slot').replaceWith(buildSortBar('proj-'+projId));
   renderTaskList('task-list-main', active, projId);
   if(done.length) renderTaskList('completed-list', done, projId);
 }
@@ -505,14 +603,15 @@ function renderProjectView(projId){
 function renderToday(){
   const today=todayStr();
   const tasks=data.tasks.filter(t=>!t.done&&t.dueDate&&t.dueDate<=today);
-  const overdue=tasks.filter(t=>t.dueDate<today);
-  const todayTasks=tasks.filter(t=>t.dueDate===today);
+  const overdue=applySort(tasks.filter(t=>t.dueDate<today),'today');
+  const todayTasks=applySort(tasks.filter(t=>t.dueDate===today),'today');
   const c=document.getElementById('content');
   c.innerHTML=`<div id="view-title">Today</div>`;
   if(!tasks.length){
     c.innerHTML+=`<div class="empty-state"><div class="icon">✅</div><h3>All clear for today</h3><p>Nothing due today. Enjoy!</p></div>`;
     return;
   }
+  c.appendChild(buildSortBar('today'));
   if(overdue.length){
     c.innerHTML+=`<div class="overdue-header">Overdue <span class="reschedule-btn" onclick="rescheduleOverdue()">Reschedule</span></div><div id="today-overdue"></div>`;
   }
@@ -527,8 +626,9 @@ function renderToday(){
 function renderUpcoming(){
   const c=document.getElementById('content');
   const today=todayStr();
-  const overdue=data.tasks.filter(t=>!t.done&&t.dueDate&&t.dueDate<today);
-  c.innerHTML=`<div id="view-title">Upcoming</div>`;
+  const overdue=applySort(data.tasks.filter(t=>!t.done&&t.dueDate&&t.dueDate<today),'upcoming');
+  c.innerHTML='<div id="view-title">Upcoming</div><div id="sort-bar-slot-up"></div>';
+  document.getElementById('sort-bar-slot-up').replaceWith(buildSortBar('upcoming'));
   if(overdue.length){
     c.innerHTML+=`<div class="overdue-header">Overdue <span class="reschedule-btn" onclick="rescheduleOverdue()">Reschedule</span></div><div id="up-overdue"></div>`;
     renderTaskList('up-overdue', overdue);
@@ -537,7 +637,7 @@ function renderUpcoming(){
   for(let i=0;i<14;i++){
     const d=new Date();d.setDate(d.getDate()+i);
     const ds=d.toISOString().split('T')[0];
-    const dt=data.tasks.filter(t=>!t.done&&t.dueDate===ds);
+    const dt=applySort(data.tasks.filter(t=>!t.done&&t.dueDate===ds),'upcoming');
     if(dt.length||i===0){
       const label=i===0?'Today':i===1?'Tomorrow':d.toLocaleDateString('en-US',{weekday:'long',month:'short',day:'numeric'});
       c.innerHTML+=`<div class="section-header" style="margin-top:${i===0?16:24}px">${label} <span class="sec-count">${dt.length}</span></div><div id="up-day-${i}"></div>`;
@@ -557,7 +657,8 @@ function renderSearch(){
     (t.labels||[]).some(l=>l.toLowerCase().includes(q))
   );
   if(!matches.length){c.querySelector('#search-results').innerHTML='<div class="empty-state"><h3>No results</h3><p>Try different keywords</p></div>';return;}
-  renderTaskList('search-results', matches);
+  c.querySelector('#search-results').before(buildSortBar('search'));
+  renderTaskList('search-results', applySort(matches,'search'));
 }
 
 function renderReporting(){
@@ -874,7 +975,8 @@ function updateModalPriorityLabel(){
   const lbl=document.getElementById('modal-priority-label');
   if(!lbl)return;
   const colors={1:'var(--red)',2:'var(--orange)',3:'var(--blue)',4:''};
-  lbl.textContent=modalPriority<4?`P${modalPriority}`:'Priority';
+  const pnames={1:'🔴 P1 Urgent',2:'🟠 P2 High',3:'🔵 P3 Medium',4:'Priority'};
+  lbl.textContent=pnames[modalPriority]||'Priority';
   lbl.style.color=colors[modalPriority]||'';
 }
 
